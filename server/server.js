@@ -47,37 +47,54 @@ io.on('connection', (socket) => {
         })
     })
 
-    socket.on(events.BROWSE, function(targetUser) {
-        socket.to(targetUser).emit(events.BROWSE, socket.id)
-    })
+    function passThrough(event) {
+        socket.on(event, function(data) {
+            data.fromUser = socket.id
+            const targetUser = data.targetUser
+            delete data.targetUser
 
-    socket.on(events.BROWSE_RESPONSE, function(data) {
-        socket.to(data.targetUser).emit(events.BROWSE_RESPONSE, {
-            fromUser: socket.id,
-            path: data.path,
-            files: data.files
+            socket.to(targetUser).emit(event, data)
         })
-    })
+    }
 
-    socket.on(events.BROWSE_PATH, function(data) {
-        socket.to(data.targetUser).emit(events.BROWSE_PATH, {
-            fromUser: socket.id,
-            path: data.path
-        })
-    })
-
-    socket.on(events.BROWSE_PATH_RESPONSE, function(data) {
-        socket.to(data.targetUser).emit(events.BROWSE_PATH_RESPONSE, {
-            fromUser: socket.id,
-            files: data.files
-        })
-    })
-
-    socket.on(events.DOWNLOAD, function(data) {
-        socket.to(data.targetUser).emit(events.DOWNLOAD, {
-            
-        })
-    })
+    passThrough(events.BROWSE)
+    passThrough(events.BROWSE_RESPONSE)
+    passThrough(events.BROWSE_PATH)
+    passThrough(events.BROWSE_PATH_RESPONSE)
+    passThrough(events.DOWNLOAD)
+    passThrough(events.DOWNLOAD_CHUNK)
+    //
+    // socket.on(events.BROWSE, function(targetUser) {
+    //     socket.to(targetUser).emit(events.BROWSE, socket.id)
+    // })
+    //
+    // socket.on(events.BROWSE_RESPONSE, function(data) {
+    //     socket.to(data.targetUser).emit(events.BROWSE_RESPONSE, {
+    //         fromUser: socket.id,
+    //         path: data.path,
+    //         files: data.files
+    //     })
+    // })
+    //
+    // socket.on(events.BROWSE_PATH, function(data) {
+    //     socket.to(data.targetUser).emit(events.BROWSE_PATH, {
+    //         fromUser: socket.id,
+    //         path: data.path
+    //     })
+    // })
+    //
+    // socket.on(events.BROWSE_PATH_RESPONSE, function(data) {
+    //     socket.to(data.targetUser).emit(events.BROWSE_PATH_RESPONSE, {
+    //         fromUser: socket.id,
+    //         files: data.files
+    //     })
+    // })
+    //
+    // socket.on(events.DOWNLOAD, function(data) {
+    //     socket.to(data.targetUser).emit(events.DOWNLOAD, {
+    //
+    //     })
+    // })
 
     socket.on('disconnected', () => {
         console.log('user disconnected')
@@ -89,3 +106,4 @@ function fetchUsers() {
     const users = Object.keys(io.sockets.connected)
     return users
 }
+

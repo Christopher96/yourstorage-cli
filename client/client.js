@@ -160,7 +160,9 @@ function promptUserCommands() {
                 messageConnectedUser()
                 break;
             case commands.BROWSE:
-                socket.emit(events.BROWSE, connectedUser)
+                socket.emit(events.BROWSE, {
+                    targetUser: connectedUser
+                })
                 break;
             case commands.LEAVE:
                 connectedUser = 0
@@ -201,24 +203,34 @@ function promptConnect() {
 }
 
 socket.on(events.DOWNLOAD, (data) => {
-    const filePath = path.resolve(data.path
-    const readStream = fs.createReadStream(filePath, data.file), {
+    const filePath = path.resolve(data.path, data.file)
+    const readStream = fs.createReadStream(filePath, {
         encoding: 'binary'
     })
 
+    const totalBytes = fs.statSync(filePath).size
+
     readStream.on('data', function(chunk) {
+        const progress = readStream.bytesRead / totalBytes
         socket.emit(events.DOWNLOAD_CHUNK, {
             targetUser: data.fromUser,
+            file: data.file,
+            progress,
             chunk
         })
     })
 })
 
-let chunks = []
+socket.on(events.DOWNLOAD_CHUNK, (data) => {
+    const dir = './downloads/';
+    if (!fs.existsSync(dir)){
+        fs.mkdirSync(dir);
+    }
 
-socket.on(events.DOWNLOAD_CHUNK, (chunk) => {
-    chunks.push(chunk)
-    console.log(chunks)
+    let output = fs.createWriteStream(dir+data.file, {
+        flags: 'w'
+    })
+    output.write(data.chunk)
 })
 
 socket.on(events.BROWSE_PATH, (data) => {
@@ -245,13 +257,17 @@ socket.on(events.BROWSE_PATH_RESPONSE, (data) => {
         choices: data.files,
         name: 'file'
     }]).then(function(answers) {
-
+        socket.emit(events.DOWNLOAD, {
+            targetUser: connectedUser,
+            path: data.path,
+            file: answers.file
+        })
     })
 })
 
-socket.on(events.BROWSE, (fromUser) => {
+socket.on(events.BROWSE, (data) => {
     socket.emit(events.BROWSE_RESPONSE, {
-        targetUser: fromUser,
+        targetUser: data.fromUser,
         files: getDirectories()
     })
 })
