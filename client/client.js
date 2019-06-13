@@ -11,7 +11,7 @@ const inquirer = require('inquirer')
 inquirer.registerPrompt('fuzzypath', require('inquirer-fuzzy-path'))
 
 
-let local = true
+let local = false
 const serverUrl = (local) ? "http://localhost:3000" : "https://yourstorage.herokuapp.com"
 
 const socket = io(serverUrl, {
@@ -102,7 +102,7 @@ function promptCommands() {
 function listUsers(users) {
     printTitle("Users connected")
     users.forEach(function(user) {
-        console.log(user);
+        console.log(user)
     })
     printEnd()
     waitForKey(promptCommands)
@@ -258,7 +258,7 @@ socket.on(events.DOWNLOAD_CHUNK, (data) => {
     output.write(data.chunk)
 
     clearLine()
-    process.stdout.write(Math.round(data.progress * 10) + "% done")
+    process.stdout.write(Math.round(data.progress * 100) + "% done")
 
     if(data.done == true) {
         clearLine()
@@ -289,7 +289,6 @@ socket.on(events.BROWSE_PATH, (data) => {
 })
 
 socket.on(events.BROWSE_PATH_RESPONSE, (data) => {
-    console.log("browse response")
     inquirer.prompt([{
         message: 'Select a file to download',
         type: 'rawlist',
