@@ -34,7 +34,7 @@ function clearConsole() {
 function waitForKey(callback) {
     console.log('Press any key to continue.')
     process.stdin.resume()
-    process.stdin.once('data', function () {
+    process.stdin.once('data', function() {
         callback()
     })
 }
@@ -50,7 +50,7 @@ function printEnd() {
 
 function printMessages() {
     printTitle("Messages")
-    if(messages.length) {
+    if (messages.length) {
         messages.forEach(data => {
             console.log("[%s]: %s", data.fromUser, data.message)
         })
@@ -67,7 +67,7 @@ function promptCommands() {
     inquirer.prompt([{
         message: 'What do you want to do?',
         type: 'rawlist',
-        choices: [ 
+        choices: [
             commands.LIST_USERS,
             commands.VIEW_MESSAGES,
             commands.SHARE,
@@ -77,7 +77,7 @@ function promptCommands() {
         name: 'command'
     }]).then(function(answers) {
         clearConsole()
-        switch(answers.command) {
+        switch (answers.command) {
             case commands.CONNECT:
                 promptConnect()
                 break;
@@ -91,7 +91,7 @@ function promptCommands() {
                 process.exit(0)
                 break;
             default:
-                socket.emit(events.COMMAND,  {
+                socket.emit(events.COMMAND, {
                     command: answers.command
                 })
                 break;
@@ -115,15 +115,15 @@ function selectDirectories(rootPath) {
         name: 'path',
         excludePath: nodePath => {
             const exclude = nodePath.includes('node_modules') || nodePath.includes('.git')
-            return exclude 
+            return exclude
         },
         itemType: 'directory',
         rootPath,
         message: 'Select a directory:',
         suggestOnly: false,
     }]).then(directory => {
-        if(directory.path == rootPath) {
-            if(directory.path == '.') rootPath += '.'
+        if (directory.path == rootPath) {
+            if (directory.path == '.') rootPath += '.'
             else rootPath += '/..'
             selectDirectories(rootPath)
         } else {
@@ -137,14 +137,14 @@ function getDirectories() {
     let directories = []
     try {
         directories = require('./directories.json')
-    } catch(e) {}
+    } catch (e) {}
     return directories
 }
 
 function saveDirectory(path) {
     let directories = getDirectories()
     directories.push(path)
-    fs.writeFile( "directories.json", JSON.stringify( directories ), "utf8", function() {
+    fs.writeFile("directories.json", JSON.stringify(directories), "utf8", function() {
         console.log("Shared directories")
         console.log(directories)
         console.log()
@@ -156,7 +156,7 @@ function saveDirectory(path) {
 function promptUserCommands() {
     clearConsole()
     inquirer.prompt([{
-        message: 'How do you want to interact with ['+connectedUser+']?',
+        message: 'How do you want to interact with [' + connectedUser + ']?',
         type: 'rawlist',
         choices: [
             commands.MESSAGE,
@@ -165,7 +165,7 @@ function promptUserCommands() {
         ],
         name: 'command'
     }]).then(function(answers) {
-        switch(answers.command) {
+        switch (answers.command) {
             case commands.MESSAGE:
                 messageConnectedUser()
                 break;
@@ -216,15 +216,17 @@ let output = null
 
 function initDownload(path, file) {
     const dir = './downloads/';
-    if (!fs.existsSync(dir)){
+    if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir);
     }
 
-    output = fs.createWriteStream(dir+file, {
+    output = fs.createWriteStream(dir + file, {
         flags: 'w'
     })
 
-    output.on('ready', function() {
+    console.log("stream")
+    output.on('open', function() {
+        console.log("ready")
         socket.emit(events.DOWNLOAD, {
             targetUser: connectedUser,
             path,
@@ -260,7 +262,7 @@ socket.on(events.DOWNLOAD_CHUNK, (data) => {
     clearLine()
     process.stdout.write(Math.round(data.progress * 100) + "% done")
 
-    if(data.done == true) {
+    if (data.done == true) {
         clearLine()
         console.log("Finished downloading: %s\n", data.file)
         waitForKey(promptUserCommands)
@@ -271,16 +273,15 @@ socket.on(events.BROWSE_PATH, (data) => {
     let files = []
     fs.readdir(data.path, function(err, items) {
         items.forEach(function(item) {
-            const filePath = data.path+'/'+item
+            const filePath = data.path + '/' + item
             try {
-                if(fs.statSync(filePath).isFile())
+                if (fs.statSync(filePath).isFile())
                     files.push(item)
-            }
-            catch(err) {
+            } catch (err) {
                 console.log("File not found.")
             }
         })
-        socket.emit(events.BROWSE_PATH_RESPONSE, { 
+        socket.emit(events.BROWSE_PATH_RESPONSE, {
             targetUser: data.fromUser,
             path: data.path,
             files
@@ -329,12 +330,12 @@ socket.on(events.MESSAGE_RECEIVED, (message) => {
 })
 
 socket.on(events.COMMAND_RESPONSE, (response) => {
-    switch(response.command) {
+    switch (response.command) {
         case commands.LIST_USERS:
             listUsers(response.data);
             break;
         case commands.CONNECT:
-            if(response.data != false) {
+            if (response.data != false) {
                 connectedUser = response.data
                 promptUserCommands()
             } else {
