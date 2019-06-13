@@ -11,7 +11,7 @@ inquirer.registerPrompt('fuzzypath', require('inquirer-fuzzy-path'))
 
 const io = require('socket.io-client');
 
-let local = true
+let local = false
 const serverUrl = (local) ? "http://localhost:3000" : "https://yourstorage.herokuapp.com"
 
 const socket = io(serverUrl, {
