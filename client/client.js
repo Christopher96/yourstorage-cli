@@ -224,9 +224,7 @@ function initDownload(path, file) {
         flags: 'w'
     })
 
-    console.log("stream")
     output.on('open', function() {
-        console.log("ready")
         socket.emit(events.DOWNLOAD, {
             targetUser: connectedUser,
             path,
