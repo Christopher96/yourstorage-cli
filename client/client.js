@@ -4,20 +4,28 @@ const events = constants.events
 
 const fs = require('fs')
 const path = require('path')
-
-const inquirer = require('inquirer')
-
-inquirer.registerPrompt('fuzzypath', require('inquirer-fuzzy-path'))
-
+const readline = require('readline')
 const io = require('socket.io-client');
 
-let local = false
+const inquirer = require('inquirer')
+inquirer.registerPrompt('fuzzypath', require('inquirer-fuzzy-path'))
+
+
+let local = true
 const serverUrl = (local) ? "http://localhost:3000" : "https://yourstorage.herokuapp.com"
 
 const socket = io(serverUrl, {
     transports: ['websocket']
 });
 
+function isFile(pathItem) {
+    return !!path.extname(pathItem);
+}
+
+function clearLine() {
+    readline.clearLine(process.stdout, 0)
+    readline.cursorTo(process.stdout, 0)
+}
 
 function clearConsole() {
     console.log('\033c')
@@ -39,7 +47,6 @@ function printTitle(title) {
 function printEnd() {
     console.log("---------------\n")
 }
-
 
 function printMessages() {
     printTitle("Messages")
@@ -138,7 +145,10 @@ function saveDirectory(path) {
     let directories = getDirectories()
     directories.push(path)
     fs.writeFile( "directories.json", JSON.stringify( directories ), "utf8", function() {
+        console.log("Shared directories")
         console.log(directories)
+        console.log()
+        waitForKey(promptCommands)
     })
 
 }
@@ -202,46 +212,74 @@ function promptConnect() {
     })
 }
 
-socket.on(events.DOWNLOAD, (data) => {
-    const filePath = path.resolve(data.path, data.file)
-    const readStream = fs.createReadStream(filePath, {
-        encoding: 'binary'
-    })
+let output = null
 
-    const totalBytes = fs.statSync(filePath).size
-
-    readStream.on('data', function(chunk) {
-        const progress = readStream.bytesRead / totalBytes
-        socket.emit(events.DOWNLOAD_CHUNK, {
-            targetUser: data.fromUser,
-            file: data.file,
-            progress,
-            chunk
-        })
-    })
-})
-
-socket.on(events.DOWNLOAD_CHUNK, (data) => {
+function initDownload(path, file) {
     const dir = './downloads/';
     if (!fs.existsSync(dir)){
         fs.mkdirSync(dir);
     }
 
-    let output = fs.createWriteStream(dir+data.file, {
+    output = fs.createWriteStream(dir+file, {
         flags: 'w'
     })
+
+    output.on('ready', function() {
+        socket.emit(events.DOWNLOAD, {
+            targetUser: connectedUser,
+            path,
+            file
+        })
+    })
+}
+
+socket.on(events.DOWNLOAD, (data) => {
+    const filePath = path.resolve(data.path, data.file)
+    const readStream = fs.createReadStream(filePath)
+
+    const totalBytes = fs.statSync(filePath).size
+
+    readStream.on('data', function(chunk) {
+        let progress = readStream.bytesRead / totalBytes
+        const done = (progress == 1)
+
+        socket.emit(events.DOWNLOAD_CHUNK, {
+            targetUser: data.fromUser,
+            file: data.file,
+            progress,
+            done,
+            chunk
+        })
+    })
+})
+
+
+socket.on(events.DOWNLOAD_CHUNK, (data) => {
     output.write(data.chunk)
+
+    clearLine()
+    process.stdout.write(Math.round(data.progress * 10) + "% done")
+
+    if(data.done == true) {
+        clearLine()
+        console.log("Finished downloading: %s\n", data.file)
+        waitForKey(promptUserCommands)
+    }
 })
 
 socket.on(events.BROWSE_PATH, (data) => {
     let files = []
     fs.readdir(data.path, function(err, items) {
         items.forEach(function(item) {
-            if(fs.lstatSync(item).isFile()) {
-                files.push(item)
+            const filePath = data.path+'/'+item
+            try {
+                if(fs.statSync(filePath).isFile())
+                    files.push(item)
+            }
+            catch(err) {
+                console.log("File not found.")
             }
         })
-
         socket.emit(events.BROWSE_PATH_RESPONSE, { 
             targetUser: data.fromUser,
             path: data.path,
@@ -251,17 +289,14 @@ socket.on(events.BROWSE_PATH, (data) => {
 })
 
 socket.on(events.BROWSE_PATH_RESPONSE, (data) => {
+    console.log("browse response")
     inquirer.prompt([{
         message: 'Select a file to download',
         type: 'rawlist',
         choices: data.files,
         name: 'file'
     }]).then(function(answers) {
-        socket.emit(events.DOWNLOAD, {
-            targetUser: connectedUser,
-            path: data.path,
-            file: answers.file
-        })
+        initDownload(data.path, answers.file)
     })
 })
 
