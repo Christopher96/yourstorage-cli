@@ -18,6 +18,7 @@ const io = require('socket.io-client');
 const inquirer = require('inquirer')
 inquirer.registerPrompt('fuzzypath', require('inquirer-fuzzy-path'))
 inquirer.registerPrompt('autocomplete', require('inquirer-autocomplete-prompt'))
+inquirer.registerPrompt('directory', require('inquirer-select-directory'))
 
 let local = true
 const serverUrl = (local) ? "http://localhost:3000" : "https://yourstorage.herokuapp.com"
@@ -168,7 +169,7 @@ function promptCommands() {
                 printMessages()
                 break;
             case commands.SHARE:
-                selectDirectories('.')
+                selectDirectories('./')
                 break;
             case commands.SHARE_REMOVE:
                 removeDirectories()
@@ -236,20 +237,12 @@ function saveDirectory(path) {
 
 function selectDirectories(rootPath) {
     inquirer.prompt([{
-        type: 'fuzzypath',
+        type: 'directory',
         name: 'path',
-        excludePath: nodePath => {
-            const exclude = nodePath.includes('node_modules') || nodePath.includes('.git')
-            return exclude
-        },
-        itemType: 'directory',
-        rootPath,
-        message: 'Select a directory (/q to go back)',
-        suggestOnly: false,
+        basePath: rootPath,
+        message: 'Select a directory',
     }]).then(directory => {
-        if(directory.path === "/q") {
-            promptCommands()
-        } else if (directory.path == rootPath) {
+        if (directory.path == rootPath) {
             if (directory.path == '.') rootPath += '.'
             else rootPath += '/..'
             selectDirectories(rootPath)
