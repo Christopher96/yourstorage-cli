@@ -1,4 +1,7 @@
-const constants = require('./constants')
+"use strict" 
+
+
+const constants = require('../constants')
 const commands = constants.commands
 const events = constants.events
 
@@ -8,14 +11,6 @@ const io = require('socket.io')(port)
 io.on('connection', (socket) => {
     console.log("Client detected [%s]", socket.id)
 
-    socket.on(events.MESSAGE, function(data) {
-        console.log("[%s] -> [%s] Message: %s", socket.id, data.targetUser, data.message);
-        socket.to(data.targetUser).emit(events.MESSAGE_RECEIVED, {
-            fromUser: socket.id,
-            message: data.message
-        })
-    })
-
     socket.on(events.COMMAND, function(data) {
         console.log('[%s] Command: %s', socket.id, data.command)
 
@@ -23,14 +18,13 @@ io.on('connection', (socket) => {
 
         switch(data.command) {
             case commands.LIST_USERS:
-                response = fetchUsers()
+                response = fetchUsers(socket.id)
                 break;
-            case commands.CONNECT:
-                const users = fetchUsers()
-                if(users.includes(data.targetUser)) {
-                    response = data.targetUser
-                }
+            case commands.CHANGE_USERNAME:
+                socket.username = data.username
+                response = socket.username
                 break;
+
         }
 
         socket.emit(events.COMMAND_RESPONSE, {
@@ -39,13 +33,33 @@ io.on('connection', (socket) => {
         })
     })
 
+    socket.on(events.MESSAGE, function(data) {
+        console.log("[%s] -> [%s] Message: %s", socket.id, data.targetId, data.message);
+        socket.to(data.targetId).emit(events.MESSAGE_RECEIVED, {
+            fromUser: getUser(socket),
+            message: data.message
+        })
+    })
+
+
+    socket.on(events.SEARCH_ID, function(searchTerm) {
+        let users = fetchUsers(socket.id)
+        let result = users.filter(user => {
+            let pass = user.id.includes(searchTerm)
+            if(pass == false && user.username != null)
+                pass = user.username.includes(searchTerm)
+            return pass
+        })
+        socket.emit(events.SEARCH_ID_RESPONSE, result)
+    })
+
     function passThrough(event) {
         socket.on(event, function(data) {
-            data.fromUser = socket.id
-            const targetUser = data.targetUser
-            delete data.targetUser
+            data.fromUser = getUser(socket)
+            const targetId = data.targetId
+            delete data.targetId
 
-            socket.to(targetUser).emit(event, data)
+            socket.to(targetId).emit(event, data)
         })
     }
 
@@ -61,9 +75,22 @@ io.on('connection', (socket) => {
     })
 })
 
+function getUser(socket) {
+    let user = {
+        id: socket.id
+    }
+    if(socket.username != null)
+        user.username = socket.username
 
-function fetchUsers() {
-    const users = Object.keys(io.sockets.connected)
+    return user
+}
+
+function fetchUsers(filterId) {
+    let users = []
+    Object.values(io.sockets.connected).map(function(socket) {
+        if(socket.id != filterId)
+            users.push(getUser(socket))
+    })
     return users
 }
 

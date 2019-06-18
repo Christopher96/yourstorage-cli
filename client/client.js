@@ -1,25 +1,102 @@
-const constants = require('./constants')
+"use strict"
+
+const constants = require('../constants')
 const commands = constants.commands
 const events = constants.events
 
 const fs = require('fs')
+
+require.extensions['.txt'] = function (module, filename) {
+    module.exports = fs.readFileSync(filename, 'utf8');
+};
+const ascii = require('../ascii.txt')
+
 const path = require('path')
 const readline = require('readline')
 const io = require('socket.io-client');
 
 const inquirer = require('inquirer')
 inquirer.registerPrompt('fuzzypath', require('inquirer-fuzzy-path'))
+inquirer.registerPrompt('autocomplete', require('inquirer-autocomplete-prompt'))
 
-
-let local = false
+let local = true
 const serverUrl = (local) ? "http://localhost:3000" : "https://yourstorage.herokuapp.com"
 
 const socket = io(serverUrl, {
     transports: ['websocket']
 });
 
+const savedName = "./saved.json"
+
+function getSavedData() {
+    let savedData = null
+    try {
+        savedData = require(savedName)
+    } catch (e) {
+        savedData = {}
+    }
+    return savedData
+}
+
+function saveDataType(type, newObj, callback) {
+    let savedData = getSavedData()
+    savedData[type] = newObj
+
+    fs.writeFile(savedName, JSON.stringify(savedData), "utf8", function() {
+        if(callback != null)
+            callback()
+    })   
+}
+
+function getSavedDataType(type) {
+    let savedData = getSavedData()
+    return savedData[type]
+}
+
+let username = null
+
+function checkUsername() {
+    usernameCheck = true
+    username = getSavedDataType("username")
+    if(username != null) {
+        socket.emit(events.COMMAND, {
+            command: commands.CHANGE_USERNAME,
+            username
+        })
+    }
+}
+
+function changeUsername() {
+    usernameCheck = false
+    inquirer.prompt([{
+        message: 'New username =>',
+        type: 'input',
+        name: 'username'
+    }]).then(function(answers) {
+        let username = answers.username
+        saveDataType("username", username)
+
+        socket.emit(events.COMMAND, { 
+            command: commands.CHANGE_USERNAME,
+            username
+        })
+    })
+}
+
+function logId() {
+    console.log(ascii)
+    if(username != null)
+        console.log("Connected as: [%s] %s\n", username, socket.id)
+    else
+        console.log("Connected as: %s\n", socket.id)
+}
+
 function isFile(pathItem) {
     return !!path.extname(pathItem);
+}
+
+function isEmpty(obj) {
+    return Object.keys(obj).length === 0;
 }
 
 function clearLine() {
@@ -28,7 +105,7 @@ function clearLine() {
 }
 
 function clearConsole() {
-    console.log('\033c')
+    process.stdout.write('\x1B[2J\x1B[0f')
 }
 
 function waitForKey(callback) {
@@ -52,7 +129,7 @@ function printMessages() {
     printTitle("Messages")
     if (messages.length) {
         messages.forEach(data => {
-            console.log("[%s]: %s", data.fromUser, data.message)
+            console.log("%s: %s", getUserString(data.fromUser), data.message)
         })
     } else {
         console.log("No new messages")
@@ -61,16 +138,19 @@ function printMessages() {
     waitForKey(promptCommands)
 }
 
+
 function promptCommands() {
     clearConsole()
-    console.log("ID: %s\n", socket.id)
+    logId()
     inquirer.prompt([{
         message: 'What do you want to do?',
-        type: 'rawlist',
+        type: 'list',
         choices: [
+            commands.CHANGE_USERNAME,
             commands.LIST_USERS,
             commands.VIEW_MESSAGES,
             commands.SHARE,
+            commands.SHARE_REMOVE,
             commands.CONNECT,
             commands.EXIT
         ],
@@ -78,6 +158,9 @@ function promptCommands() {
     }]).then(function(answers) {
         clearConsole()
         switch (answers.command) {
+            case commands.CHANGE_USERNAME:
+                changeUsername()
+                break;
             case commands.CONNECT:
                 promptConnect()
                 break;
@@ -86,6 +169,9 @@ function promptCommands() {
                 break;
             case commands.SHARE:
                 selectDirectories('.')
+                break;
+            case commands.SHARE_REMOVE:
+                removeDirectories()
                 break;
             case commands.EXIT:
                 process.exit(0)
@@ -99,15 +185,54 @@ function promptCommands() {
     })
 }
 
+function getUserString(user) {
+    let string = ""
+    if(user.username != null)
+        string = "["+user.username+"] "
+    string += user.id
+    return string
+}
+
+function getUserStrings(users) {
+    let strings = []
+    users.forEach(function(user) {
+        strings.push(getUserString(user))
+    })
+    return strings
+}
+
 function listUsers(users) {
     printTitle("Users connected")
-    users.forEach(function(user) {
+    let strings = getUserStrings(users)
+    strings.forEach(user => {
         console.log(user)
     })
     printEnd()
     waitForKey(promptCommands)
 }
 
+
+function getDirectories() {
+    let dirs = getSavedDataType("directories") 
+    if(dirs != null)
+        return dirs
+    return []
+}
+
+function saveDirectory(path) {
+    clearConsole()
+    let dirs = getDirectories()
+    if(dirs.includes(path)) {
+        console.log("You have already shared this directory.\n")
+        waitForKey(promptCommands)
+        return
+    }
+    dirs.push(path)
+    saveDataType("directories", dirs, function() {
+        console.log("\nSaved path '%s'\n", path)
+        waitForKey(promptCommands)
+    })
+}
 
 function selectDirectories(rootPath) {
     inquirer.prompt([{
@@ -119,10 +244,12 @@ function selectDirectories(rootPath) {
         },
         itemType: 'directory',
         rootPath,
-        message: 'Select a directory:',
+        message: 'Select a directory (/q to go back)',
         suggestOnly: false,
     }]).then(directory => {
-        if (directory.path == rootPath) {
+        if(directory.path === "/q") {
+            promptCommands()
+        } else if (directory.path == rootPath) {
             if (directory.path == '.') rootPath += '.'
             else rootPath += '/..'
             selectDirectories(rootPath)
@@ -133,31 +260,43 @@ function selectDirectories(rootPath) {
     })
 }
 
-function getDirectories() {
-    let directories = []
-    try {
-        directories = require('./directories.json')
-    } catch (e) {}
-    return directories
-}
-
-function saveDirectory(path) {
-    let directories = getDirectories()
-    directories.push(path)
-    fs.writeFile("directories.json", JSON.stringify(directories), "utf8", function() {
-        console.log("Shared directories")
-        console.log(directories)
-        console.log()
+function removeDirectories() {
+    clearConsole()
+    let dirs = getDirectories()
+    if(dirs.length === 0) {
+        console.log("You have not shared any directories yet.\n")
         waitForKey(promptCommands)
-    })
+        return
+    }
 
+    let cancel = "(Go back)"
+    dirs.unshift(cancel)
+
+    inquirer.prompt([{
+        message: 'Which directory do you want to remove?',
+        type: 'list',
+        choices: dirs,
+        name: 'directory'
+    }]).then(function(answers) {
+        dirs.shift()
+
+        if(answers.directory === cancel) {
+            promptCommands()
+        } else {
+            dirs = dirs.filter(dir => dir != answers.directory)
+            saveDataType("directories", dirs, () => {
+                console.log("\nDirectory is no longer shared.\n")
+                waitForKey(promptCommands)
+            })
+        }
+    })
 }
 
 function promptUserCommands() {
     clearConsole()
     inquirer.prompt([{
-        message: 'How do you want to interact with [' + connectedUser + ']?',
-        type: 'rawlist',
+        message: 'How do you want to interact with ' + getUserString(connectedUser) + '?',
+        type: 'list',
         choices: [
             commands.MESSAGE,
             commands.BROWSE,
@@ -171,11 +310,11 @@ function promptUserCommands() {
                 break;
             case commands.BROWSE:
                 socket.emit(events.BROWSE, {
-                    targetUser: connectedUser
+                    targetId: connectedUser.id
                 })
                 break;
             case commands.LEAVE:
-                connectedUser = 0
+                connectedUser = null
                 promptCommands()
                 break;
         }
@@ -190,25 +329,45 @@ function messageConnectedUser() {
     }]).then(function(answers) {
         socket.emit(events.MESSAGE, {
             message: answers.message,
-            targetUser: connectedUser
+            targetId: connectedUser.id
         })
         promptUserCommands()
     })
 
 }
 
-let connectedUser = 0
+
+let userResults = []
+
+function searchId(searchTerm) {
+    return new Promise(function(resolve, reject) {
+        socket.emit(events.SEARCH_ID, searchTerm)
+        socket.once(events.SEARCH_ID_RESPONSE, function(users) {
+            resolve(users)
+        })
+    })
+}
+
+let foundUsers = null
+let userStrings = null
+let connectedUser = null
 
 function promptConnect() {
     inquirer.prompt([{
-        message: 'Who do you want to connect to? [ID]',
-        type: 'input',
-        name: 'userId'
+        name: 'userString',
+        message: 'Who do you want to connect to?',
+        type: 'autocomplete',
+        source: function(answers, input) {
+            return searchId(input).then(function(users) {
+                foundUsers = users
+                userStrings = getUserStrings(users)
+                return userStrings 
+            })
+        }
     }]).then(function(answers) {
-        socket.emit(events.COMMAND, {
-            command: commands.CONNECT,
-            targetUser: answers.userId
-        })
+        let user = foundUsers[userStrings.indexOf(answers.userString)]
+        connectedUser = user
+        promptUserCommands()
     })
 }
 
@@ -226,7 +385,7 @@ function initDownload(path, file) {
 
     output.on('open', function() {
         socket.emit(events.DOWNLOAD, {
-            targetUser: connectedUser,
+            targetId: connectedUser.id,
             path,
             file
         })
@@ -244,7 +403,7 @@ socket.on(events.DOWNLOAD, (data) => {
         const done = (progress == 1)
 
         socket.emit(events.DOWNLOAD_CHUNK, {
-            targetUser: data.fromUser,
+            targetId: data.fromUser.id,
             file: data.file,
             progress,
             done,
@@ -262,7 +421,7 @@ socket.on(events.DOWNLOAD_CHUNK, (data) => {
 
     if (data.done == true) {
         clearLine()
-        console.log("Finished downloading: %s\n", data.file)
+        console.log("\nFinished downloading: %s\n", data.file)
         waitForKey(promptUserCommands)
     }
 })
@@ -280,7 +439,7 @@ socket.on(events.BROWSE_PATH, (data) => {
             }
         })
         socket.emit(events.BROWSE_PATH_RESPONSE, {
-            targetUser: data.fromUser,
+            targetId: data.fromUser.id,
             path: data.path,
             files
         })
@@ -288,9 +447,15 @@ socket.on(events.BROWSE_PATH, (data) => {
 })
 
 socket.on(events.BROWSE_PATH_RESPONSE, (data) => {
+    clearConsole()
+    if(isEmpty(data.files)) {
+        console.log("This directory is empty...\n")
+        waitForKey(promptUserCommands)
+        return
+    }
     inquirer.prompt([{
         message: 'Select a file to download',
-        type: 'rawlist',
+        type: 'list',
         choices: data.files,
         name: 'file'
     }]).then(function(answers) {
@@ -300,22 +465,27 @@ socket.on(events.BROWSE_PATH_RESPONSE, (data) => {
 
 socket.on(events.BROWSE, (data) => {
     socket.emit(events.BROWSE_RESPONSE, {
-        targetUser: data.fromUser,
-        files: getDirectories()
+        targetId: data.fromUser.id,
+        directories: getDirectories()
     })
 })
 
 socket.on(events.BROWSE_RESPONSE, (data) => {
     clearConsole()
-    console.log("Directories of [%s]", data.fromUser)
+    if(isEmpty(data.directories)) {
+        console.log("%s has no directories\n", getUserString(connectedUser))
+        waitForKey(promptUserCommands)
+        return
+    }
+    console.log("Directories of %s\n", getUserString(connectedUser))
     inquirer.prompt([{
         message: 'Select a directory',
-        type: 'rawlist',
-        choices: data.files,
+        type: 'list',
+        choices: data.directories,
         name: 'path'
     }]).then(function(answers) {
         socket.emit(events.BROWSE_PATH, {
-            targetUser: connectedUser,
+            targetId: connectedUser.id,
             path: answers.path
         })
     })
@@ -342,11 +512,24 @@ socket.on(events.COMMAND_RESPONSE, (response) => {
                 waitForKey(promptCommands)
             }
             break;
+        case commands.CHANGE_USERNAME:
+            if(usernameCheck == true) break;
+            if(response.data != false) {
+                username = response.data
+                console.log("\nUsername changed to [%s]\n", username)
+            } else {
+                console.log("\nUnable to change username\n")
+            }
+            waitForKey(promptCommands)
+            break;
     }
 })
 
+let usernameCheck = true
+
 socket.on('connect', () => {
-    promptCommands();
+    checkUsername()
+    promptCommands()
 })
 
 // on reconnection, reset the transports option, as the Websocket
