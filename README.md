@@ -1,5 +1,5 @@
 ### yourstorage-cli
-A Command Line Interface for sending files over the internet through sockets where a central socket server is directly passing through data between the connected clients running with Node JS
+A Command Line Interface for sending files over the internet through sockets running on Node JS. A central socket server is directly passing through data between the connected clients.
 
 ```
  __  ______  __  _____  ______________  ___  ___  _________
