@@ -17,7 +17,7 @@ const io = require('socket.io-client');
 
 const inquirer = require('inquirer')
 inquirer.registerPrompt('fuzzypath', require('inquirer-fuzzy-path'))
-inquirer.registerPrompt('autocomplete', require('inquirer-autocomplete-prompt'))
+// inquirer.registerPrompt('autocomplete', require('inquirer-autocomplete-prompt'))
 inquirer.registerPrompt('directory', require('inquirer-select-directory'))
 
 let local = true
@@ -348,7 +348,7 @@ let connectedUser = null
 function promptConnect() {
     inquirer.prompt([{
         name: 'userString',
-        message: 'Who do you want to connect to?',
+        message: 'Who do you want to connect to? ("/q" to go back)',
         type: 'autocomplete',
         source: function(answers, input) {
             return searchId(input).then(function(users) {
@@ -358,9 +358,17 @@ function promptConnect() {
             })
         }
     }]).then(function(answers) {
-        let user = foundUsers[userStrings.indexOf(answers.userString)]
-        connectedUser = user
-        promptUserCommands()
+        if(userString == "/q" || prompt) {
+
+            return
+        }
+        if(foundUsers.length != 0) {
+            let user = foundUsers[userStrings.indexOf(answers.userString)]
+            connectedUser = user
+            promptUserCommands()
+        } else {
+
+        }
     })
 }
 
