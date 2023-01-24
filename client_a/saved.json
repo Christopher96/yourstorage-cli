@@ -1,2 +1,4 @@
-{ "username": "asd", "local_server": true }
-
+{
+    "username": "hello",
+    "local_server": true
+}
