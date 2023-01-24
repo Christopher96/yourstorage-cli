@@ -23,7 +23,7 @@ const serverUrl = local
   : "http://yourstorage.herokuapp.com";
 // const serverUrl = "http://188.151.68.212:9999"
 
-const socket = io(serverUrl, {
+const remote_server = io(serverUrl, {
   transports: ["websocket"],
 });
 
@@ -32,7 +32,7 @@ const savedName = "./saved.json";
 function getSavedData() {
   let savedData = null;
   try {
-    savedData = require(savedName);
+    savedData = JSON.parse(fs.readFileSync(savedName));
   } catch (e) {
     savedData = {};
   }
@@ -53,13 +53,11 @@ function getSavedDataType(type) {
   return savedData[type];
 }
 
-let username = null;
-
 function checkUsername() {
   usernameCheck = true;
-  username = getSavedDataType("username");
+  let username = getSavedDataType("username");
   if (username != null) {
-    socket.emit(events.COMMAND, {
+    remote_server.emit(events.COMMAND, {
       command: commands.CHANGE_USERNAME,
       username,
     });
@@ -78,9 +76,8 @@ function changeUsername() {
     ])
     .then(function (answers) {
       let username = answers.username;
-      saveDataType("username", username);
 
-      socket.emit(events.COMMAND, {
+      remote_server.emit(events.COMMAND, {
         command: commands.CHANGE_USERNAME,
         username,
       });
@@ -89,9 +86,10 @@ function changeUsername() {
 
 function logId() {
   console.log(ascii);
+  let username = getSavedDataType("username");
   if (username != null)
-    console.log("Connected as: [%s] %s\n", username, socket.id);
-  else console.log("Connected as: %s\n", socket.id);
+    console.log("Connected as: [%s] %s\n", username, remote_server.id);
+  else console.log("Connected as: %s\n", remote_server.id);
 }
 
 function isFile(pathItem) {
@@ -183,7 +181,7 @@ function promptCommands() {
           process.exit(0);
           break;
         default:
-          socket.emit(events.COMMAND, {
+          remote_server.emit(events.COMMAND, {
             command: answers.command,
           });
           break;
@@ -315,7 +313,7 @@ function promptUserCommands() {
           messageConnectedUser();
           break;
         case commands.BROWSE:
-          socket.emit(events.BROWSE, {
+          remote_server.emit(events.BROWSE, {
             targetId: connectedUser.id,
           });
           break;
@@ -337,7 +335,7 @@ function messageConnectedUser() {
       },
     ])
     .then(function (answers) {
-      socket.emit(events.MESSAGE, {
+      remote_server.emit(events.MESSAGE, {
         message: answers.message,
         targetId: connectedUser.id,
       });
@@ -349,39 +347,66 @@ let userResults = [];
 
 function searchId(searchTerm) {
   return new Promise(function (resolve, reject) {
-    socket.emit(events.SEARCH_ID, searchTerm);
-    socket.once(events.SEARCH_ID_RESPONSE, function (users) {
+    remote_server.emit(events.SEARCH_ID, searchTerm);
+    remote_server.once(events.SEARCH_ID_RESPONSE, function (users) {
       resolve(users);
     });
   });
 }
 
-let foundUsers = null;
-let userStrings = null;
-let connectedUser = null;
-
 function promptConnect() {
-  inquirer
+  let userStrings = null;
+  let foundUsers = null;
+  let exit = false;
+  const back = "--- Return ---";
+  let prompt = inquirer
     .prompt([
       {
         name: "userString",
-        message: "Who do you want to connect to?",
+        message: "Who do you want to connect to?\n>",
         type: "autocomplete",
         source: function (answers, input) {
-          if (input == null) return [];
+          let options = [back];
           return searchId(input).then(function (users) {
-            foundUsers = users;
-            userStrings = getUserStrings(users);
-            return userStrings;
+            if (users) {
+              userStrings = getUserStrings(users);
+              foundUsers = users;
+              options = options.concat(userStrings);
+            }
+            return options;
           });
         },
       },
     ])
     .then(function (answers) {
-      let user = foundUsers[userStrings.indexOf(answers.userString)];
-      connectedUser = user;
-      promptUserCommands();
+      if (answers.userString == back) return promptCommands();
+      if (answers.userString != null) {
+        let user = foundUsers[userStrings.indexOf(answers.userString)];
+        initUserConnection(user);
+      }
     });
+}
+
+let connectedUser = null;
+
+function initUserConnection(user) {
+  connectedUser = user;
+
+  remote_server.emit(events.COMMAND, {
+    command: commands.CONNECT,
+    user,
+  });
+  // return promptUserCommands();
+}
+
+let client_server = null;
+
+function establishUserConnection(user) {
+  let socket_uri = `${user.ip}:9999`;
+  client_server = io(socket_uri);
+  client_server.on("connect", () => {
+    console.log("Connected to client [%s]", user.id);
+  });
 }
 
 let output = null;
@@ -397,7 +422,7 @@ function initDownload(path, file) {
   });
 
   output.on("open", function () {
-    socket.emit(events.DOWNLOAD, {
+    remote_server.emit(events.DOWNLOAD, {
       targetId: connectedUser.id,
       path,
       file,
@@ -405,7 +430,7 @@ function initDownload(path, file) {
   });
 }
 
-socket.on(events.DOWNLOAD, (data) => {
+remote_server.on(events.DOWNLOAD, (data) => {
   const filePath = path.resolve(data.path, data.file);
   const readStream = fs.createReadStream(filePath);
 
@@ -415,7 +440,7 @@ socket.on(events.DOWNLOAD, (data) => {
     let progress = readStream.bytesRead / totalBytes;
     const done = progress == 1;
 
-    socket.emit(events.DOWNLOAD_CHUNK, {
+    remote_server.emit(events.DOWNLOAD_CHUNK, {
       targetId: data.fromUser.id,
       file: data.file,
       progress,
@@ -425,7 +450,7 @@ socket.on(events.DOWNLOAD, (data) => {
   });
 });
 
-socket.on(events.DOWNLOAD_CHUNK, (data) => {
+remote_server.on(events.DOWNLOAD_CHUNK, (data) => {
   output.write(data.chunk);
 
   clearLine();
@@ -438,7 +463,7 @@ socket.on(events.DOWNLOAD_CHUNK, (data) => {
   }
 });
 
-socket.on(events.BROWSE_PATH, (data) => {
+remote_server.on(events.BROWSE_PATH, (data) => {
   let files = [];
   fs.readdir(data.path, function (err, items) {
     items.forEach(function (item) {
@@ -449,7 +474,7 @@ socket.on(events.BROWSE_PATH, (data) => {
         console.log("File not found.");
       }
     });
-    socket.emit(events.BROWSE_PATH_RESPONSE, {
+    remote_server.emit(events.BROWSE_PATH_RESPONSE, {
       targetId: data.fromUser.id,
       path: data.path,
       files,
@@ -457,7 +482,7 @@ socket.on(events.BROWSE_PATH, (data) => {
   });
 });
 
-socket.on(events.BROWSE_PATH_RESPONSE, (data) => {
+remote_server.on(events.BROWSE_PATH_RESPONSE, (data) => {
   clearConsole();
   if (isEmpty(data.files)) {
     console.log("This directory is empty...\n");
@@ -478,14 +503,14 @@ socket.on(events.BROWSE_PATH_RESPONSE, (data) => {
     });
 });
 
-socket.on(events.BROWSE, (data) => {
-  socket.emit(events.BROWSE_RESPONSE, {
+remote_server.on(events.BROWSE, (data) => {
+  remote_server.emit(events.BROWSE_RESPONSE, {
     targetId: data.fromUser.id,
     directories: getDirectories(),
   });
 });
 
-socket.on(events.BROWSE_RESPONSE, (data) => {
+remote_server.on(events.BROWSE_RESPONSE, (data) => {
   clearConsole();
   if (isEmpty(data.directories)) {
     console.log("%s has no directories\n", getUserString(connectedUser));
@@ -503,7 +528,7 @@ socket.on(events.BROWSE_RESPONSE, (data) => {
       },
     ])
     .then(function (answers) {
-      socket.emit(events.BROWSE_PATH, {
+      remote_server.emit(events.BROWSE_PATH, {
         targetId: connectedUser.id,
         path: answers.path,
       });
@@ -512,19 +537,20 @@ socket.on(events.BROWSE_RESPONSE, (data) => {
 
 let messages = [];
 
-socket.on(events.MESSAGE_RECEIVED, (message) => {
+remote_server.on(events.MESSAGE_RECEIVED, (message) => {
   messages.push(message);
 });
 
-socket.on(events.COMMAND_RESPONSE, (response) => {
-  switch (response.command) {
+remote_server.on(events.COMMAND_RESPONSE, (data) => {
+  switch (data.command) {
     case commands.LIST_USERS:
-      listUsers(response.data);
+      listUsers(data.response);
       break;
     case commands.CONNECT:
-      if (response.data != false) {
-        connectedUser = response.data;
-        promptUserCommands();
+      if (data.response != false) {
+        establishUserConnection(data.response);
+        // connectedUser = data.response;
+        // promptUserCommands();
       } else {
         clearConsole();
         console.log("\nNo user found with that ID\n");
@@ -533,9 +559,9 @@ socket.on(events.COMMAND_RESPONSE, (response) => {
       break;
     case commands.CHANGE_USERNAME:
       if (usernameCheck == true) break;
-      if (response.data != false) {
-        username = response.data;
-        console.log("\nUsername changed to [%s]\n", username);
+      if (data.response != false) {
+        saveDataType("username", data.response);
+        console.log("\nUsername changed to [%s]\n", data.response);
       } else {
         console.log("\nUnable to change username\n");
       }
@@ -546,14 +572,27 @@ socket.on(events.COMMAND_RESPONSE, (response) => {
 
 let usernameCheck = true;
 
-socket.on("connect", () => {
-  console.log("asdf");
+remote_server.on("connect", () => {
   checkUsername();
   promptCommands();
 });
 
 // on reconnection, reset the transports option, as the Websocket
 // connection may have failed (caused by proxy, firewall, browser, ...)
-socket.on("reconnect_attempt", () => {
-  socket.io.opts.transports = ["polling", "websocket"];
+remote_server.on("reconnect_attempt", () => {
+  remote_server.io.opts.transports = ["polling", "websocket"];
 });
+
+let local_server_enabled = getSavedDataType("local_server");
+
+import { Server } from "socket.io";
+
+if (local_server_enabled) {
+  const port = process.env.PORT || 9999;
+
+  const local_server = new Server(port, {});
+
+  local_server.on("connection", (socket) => {
+    console.log("Client connected [%s]", socket.id);
+  });
+}

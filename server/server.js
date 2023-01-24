@@ -59,7 +59,7 @@ function onProxyEvent(socket) {
 }
 
 function onCommandEvent(socket) {
-  socket.on(events.COMMAND, function (data) {
+  socket.on(events.COMMAND, async (data) => {
     console.log("[%s] Command: %s", socket.id, data.command);
 
     let response = false;
@@ -69,15 +69,26 @@ function onCommandEvent(socket) {
         response = fetchUsersByRoom(rooms.LOBBY);
         break;
       case commands.CHANGE_USERNAME:
-        console.log(data.username);
+        // TODO: Safe check this string
         socket.username = data.username;
         response = socket.username;
+        break;
+      case commands.CONNECT:
+        let sockets = await io.in(rooms.LOBBY).fetchSockets();
+
+        sockets.forEach((socket) => {
+          if (socket.id == data.user.id) {
+            let user = getUser(socket);
+            user.ip = socket.handshake.address;
+            response = user;
+          }
+        });
         break;
     }
 
     socket.emit(events.COMMAND_RESPONSE, {
       command: data.command,
-      data: response,
+      response,
     });
   });
 }
@@ -99,15 +110,16 @@ function onMessageEvent(socket) {
 
 function onSearchEvent(socket) {
   socket.on(events.SEARCH_ID, async (searchTerm) => {
-    let users = await fetchUsersByRoom(rooms.LOBBY);
-    let result = users.filter((user) => {
-      if (user.id == socket.id) return false;
+    fetchUsersByRoom(rooms.LOBBY).then((users) => {
+      let result = users.filter((user) => {
+        if (user.id == socket.id) return false;
 
-      let pass = user.id.includes(searchTerm);
-      if (pass == false && user.username != null)
-        pass = user.username.includes(searchTerm);
-      return pass;
+        let pass = user.id.includes(searchTerm);
+        if (pass == false && user.username != null)
+          pass = user.username.includes(searchTerm);
+        return pass;
+      });
+      socket.emit(events.SEARCH_ID_RESPONSE, result);
     });
-    socket.emit(events.SEARCH_ID_RESPONSE, result);
   });
 }
